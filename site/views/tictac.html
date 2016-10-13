@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Tic Tac Toe</title>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
+    <script>
+        var websocket = null;
+        var side = "Tic"
+        $(document).ready(function() {
+            $("#connectGame").click(function() {
+                $(".field").html("")
+                var gameId = $("#gameIdInput").val()
+                $.post("/joinGame", {gameId: gameId}, function(data) {
+                    if (data.status == "OK") {
+                        $("#createGame").attr("disabled", "disabled")
+                        $("#connectGame").attr("disabled", "disabled")
+                        $("#gameIdInput").attr("readonly", "readonly")
+                        side = data.side
+                        $(`input[value=${side}]`).prop("checked", true)
+                        $('input[name=side]').attr("disabled", "disabled")
+                        websocket = new WebSocket(data.url)
+                        websocket.onmessage = function(data) {
+                            websocketBehavior(websocket, data)
+                        }
+                    } else {
+                        $("#message").text(data.errorMessage)
+                    }
+                })
+            })
+            $("#createGame").click(function() {
+                $(".field").html("")
+                side = $('input[name=side]:checked').val()
+                $.post("/createGame", {side: side}, function(data) {
+                    if (data.status == "OK") {
+                        $('input[name=side]').attr("disabled", "disabled")
+                        $("#createGame").attr("disabled", "disabled")
+                        $("#connectGame").attr("disabled", "disabled")
+                        $("#gameIdInput").attr("readonly", "readonly")
+                        $("#gameIdInput").val(data.gameId)
+                        websocket = new WebSocket(data.url);
+                        websocket.onmessage = function(data) {
+                            websocketBehavior(websocket, data)
+                        }
+                    } else {
+                        $("#message").text(data.errorMessage)
+                    }
+                })
+            })
+
+            function fieldClickHandler() {
+                var x = parseInt($(this).attr("x"))
+                var y = parseInt($(this).attr("y"))
+                websocket.send(JSON.stringify({
+                    eventType: "Move",
+                    side: side,
+                    x: x,
+                    y: y
+                }))
+                $(".field").off("click", fieldClickHandler)
+                $(this).text(side == "Tic" ? "x" : "o")
+                console.log("x: " + $(this).attr("x"))
+                console.log("y: " + $(this).attr("y"))
+            }
+
+            function websocketBehavior(websocket, message) {
+                var data = JSON.parse(message.data)
+                if (data.eventType == "GameStart") {
+                    $("#message").text("Game start. Your side is " + side)
+                    if (side == "Tic") {
+                        $(".field").click(fieldClickHandler)
+                    }
+                } else if (data.eventType == "Move") {
+                    var x = data.x.toString()
+                    var y = data.y.toString()
+                    $(`.field[x=${x}][y=${y}]`).text(data.side == "Tic" ? "x" : "o")
+                    $(".field").click(fieldClickHandler)
+                } else if (data.eventType == "Win") {
+                    $("#message").text("Game end. Winner: " + data.side)
+                    $("#createGame").removeAttr("disabled")
+                    $("#connectGame").removeAttr("disabled")
+                    $("#gameIdInput").removeAttr("readonly")
+                    $('input[name=side]').removeAttr("disabled")
+                    websocket.close
+                } else if (data.eventType == "Draw") {
+                    $("#message").text("Game end. Draw")
+                    $("#createGame").removeAttr("disabled")
+                    $("#connectGame").removeAttr("disabled")
+                    $("#gameIdInput").removeAttr("readonly")
+                    $('input[name=side]').removeAttr("disabled")
+                    websocket.close
+                } else if (data.eventType == "Error") {
+                    $("#message").text("Error: " + data.description)
+                }
+            }
+        })
+    </script>
+</head>
+<body>
+<div id="message"></div>
+<div>
+    <p><input name="side" type="radio" value="Tic" checked>Tic</p>
+    <p><input name="side" type="radio" value="Toe">Toe</p>
+</div>
+<button id="createGame">Create new game</button>
+<div>
+    <input id="gameIdInput" type="text" placeholder="game identifier"/>
+    <button id="connectGame">Connect</button>
+</div>
+<table id="field" border="1">
+    <tr>
+        <td class="field" width="40" height="40" align="center" x="0" y="0"></td>
+        <td class="field" width="40" height="40" align="center" x="0" y="1"></td>
+        <td class="field" width="40" height="40" align="center" x="0" y="2"></td>
+    </tr>
+    <tr>
+        <td class="field" width="40" height="40" align="center" x="1" y="0"></td>
+        <td class="field" width="40" height="40" align="center" x="1" y="1"></td>
+        <td class="field" width="40" height="40" align="center" x="1" y="2"></td>
+    </tr>
+    <tr>
+        <td class="field" width="40" height="40" align="center" x="2" y="0"></td>
+        <td class="field" width="40" height="40" align="center" x="2" y="1"></td>
+        <td class="field" width="40" height="40" align="center" x="2" y="2"></td>
+    </tr>
+</table>
+</body>
+</html>
