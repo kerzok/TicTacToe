@@ -91,6 +91,12 @@
                     websocket.close
                 } else if (data.eventType == "Error") {
                     $("#message").text("Error: " + data.description)
+                } else if (data.eventType == "UserLeft") {
+                    $("#message").text("Your opponent has left game. Winner: " + side)
+                    $("#createGame").removeAttr("disabled")
+                    $("#connectGame").removeAttr("disabled")
+                    $("#gameIdInput").removeAttr("readonly")
+                    $('input[name=side]').removeAttr("disabled")
                 }
             }
         })
