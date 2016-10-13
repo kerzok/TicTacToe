@@ -29,58 +29,64 @@ class DbActor extends Actor with ActorLogging {
     case AddGameEvent(gameId, gameEvent) =>
       val findResults = games.find(equal("_id", gameId)).results()
       if (findResults.isEmpty) {
-        games.insertOne(Game(gameId, Seq(gameEvent))).results()
+        games.insertOne(StoredEvents(gameId, Seq(gameEvent))).results()
       }
       findResults.foreach(document => {
-        val game: Game = document
+        val game: StoredEvents = document
         games.findOneAndReplace(game, game.copy(events = game.events :+ gameEvent)).results()
       })
-  }
-
-  object ImplicitGameEventTransformers {
-    implicit def gameEvent2Document(document: Document): GameEvent = {
-      GameEvent.parseEvent(parse(document.toJson()))
-    }
-
-    implicit def document2GameEvent(gameEvent: GameEvent): Document = {
-      Document(GameEvent.eventToJson(gameEvent))
-    }
-  }
-
-  case class Game(id: String, events: Seq[GameEvent])
-  object Game {
-    import ImplicitGameEventTransformers._
-    implicit def fromDocument(document: Document): Game = {
-      val id = document("_id").asString().getValue
-      import scala.collection.JavaConversions._
-      val events = document("events").asArray().getValues.toList.map(bson => Document(bson.asDocument()) : GameEvent)
-      Game(id, events)
-    }
-
-    implicit def toDocument(game: Game): Document = {
-      val Game(id, events) = game
-      Document("_id" -> id, "events" -> events.map(event => event : Document))
-    }
-  }
-
-  object Helpers {
-    implicit class DocumentObservable[C](val observable: Observable[Document]) extends ImplicitObservable[Document] {
-      override val converter: (Document) => String = (doc) => doc.toJson
-    }
-
-    implicit class GenericObservable[C](val observable: Observable[C]) extends ImplicitObservable[C] {
-      override val converter: (C) => String = (doc) => doc.toString
-    }
-
-    trait ImplicitObservable[C] {
-      val observable: Observable[C]
-      val converter: (C) => String
-
-      def results(): Seq[C] = Await.result(observable.toFuture(), Duration(10, TimeUnit.SECONDS))
-    }
-
+    case GetGame(gameId) =>
+      val findResults = games.find(equal("_id", gameId)).results()
+      if (findResults.isEmpty)
+        sender() ! None
+      else
+        sender() ! Some(findResults.head: StoredEvents)
   }
 }
 
-case class AddGameEvent(gameId: String, gameEvent: GameEvent)
+object ImplicitGameEventTransformers {
+  implicit def gameEvent2Document(document: Document): GameEvent = {
+    GameEvent.parseEvent(parse(document.toJson()))
+  }
 
+  implicit def document2GameEvent(gameEvent: GameEvent): Document = {
+    Document(GameEvent.eventToJson(gameEvent))
+  }
+}
+
+
+object Helpers {
+  implicit class DocumentObservable[C](val observable: Observable[Document]) extends ImplicitObservable[Document] {
+    override val converter: (Document) => String = (doc) => doc.toJson
+  }
+
+  implicit class GenericObservable[C](val observable: Observable[C]) extends ImplicitObservable[C] {
+    override val converter: (C) => String = (doc) => doc.toString
+  }
+
+  trait ImplicitObservable[C] {
+    val observable: Observable[C]
+    val converter: (C) => String
+
+    def results(): Seq[C] = Await.result(observable.toFuture(), Duration(10, TimeUnit.SECONDS))
+  }
+
+}
+
+case class StoredEvents(id: String, events: Seq[GameEvent])
+object StoredEvents {
+  import ImplicitGameEventTransformers._
+  implicit def document2StoredEvents(document: Document): StoredEvents = {
+    val id = document("_id").asString().getValue
+    import scala.collection.JavaConversions._
+    val events = document("events").asArray().getValues.toList.map(bson => Document(bson.asDocument()): GameEvent)
+    StoredEvents(id, events)
+  }
+
+  implicit def storedEvents2Document(game: StoredEvents): Document = {
+    val StoredEvents(id, events) = game
+    Document("_id" -> id, "events" -> events.map(event => event: Document))
+  }
+}
+case class AddGameEvent(gameId: String, gameEvent: GameEvent)
+case class GetGame(gameId: String)

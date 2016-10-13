@@ -10,9 +10,9 @@ import scala.annotation.tailrec
 /**
   * Created by kerzo on 09.10.2016.
   */
-final class GameActor(id: String, dbActor: ActorRef) extends PersistentActor with ActorLogging {
+final class GameActor(id: String, dbActor: ActorRef, boardSize: Int) extends PersistentActor with ActorLogging {
+  def this(id: String, dbActor: ActorRef) = this(id, dbActor, 3)
   var players = Map.empty[GameSide, ActorRef]
-  val boardSize: Int = 3
   val board = Array.ofDim[Option[GameSide]](boardSize, boardSize)
   for {
      i <- 0 until boardSize
@@ -36,17 +36,15 @@ final class GameActor(id: String, dbActor: ActorRef) extends PersistentActor wit
       context.watch(actorRef)
       players += side -> actorRef
       if (players.size == 2) sendEventToAll(GameStart)
-    case UserLeft(side) =>
+    case userLeft@UserLeft(side) =>
       log.info(s"left $side")
       val ref = players(side)
       context.unwatch(ref)
       context.stop(ref)
       players -= side
-      sendEventToSide(opponentSide(side), Error("Your opponent has left"))
+      sendEventToSide(opponentSide(side), userLeft)
     case move@Move(side, _, _) if side == currentSide => persist(move)(makeMove)
-    case Move(side, _, _) =>
-      val response = Error("Not your turn")
-      sendEventToSide(side, response)
+    case Move(side, _, _) => sendEventToSide(side, Error("Not your turn"))
   }
 
   def makeMove(move: Move)(implicit isRecover: Boolean = false) = move match {
@@ -61,9 +59,7 @@ final class GameActor(id: String, dbActor: ActorRef) extends PersistentActor wit
         currentSide = opponentSide(side)
         sendEventToSide(currentSide, move)
       }
-    case Move(side, _, _) =>
-      val response = Error("Invalid coordinated")
-      sendEventToSide(side, response)
+    case Move(side, _, _) => sendEventToSide(side, Error("Invalid coordinated"))
   }
 
   def checkBorders(x: Int, y: Int): Boolean = x < boardSize && x >= 0 && y < boardSize && y >= 0
@@ -116,9 +112,9 @@ final class GameActor(id: String, dbActor: ActorRef) extends PersistentActor wit
 
   @tailrec
   def check(x: Int, y: Int,
-                          checkFirst: (Int, Int) => Boolean,
-                          checkSecond: (Int, Int) => Boolean,
-                          moveTo: (Int, Int) => (Int, Int)): Boolean = {
+            checkFirst: (Int, Int) => Boolean,
+            checkSecond: (Int, Int) => Boolean,
+            moveTo: (Int, Int) => (Int, Int)): Boolean = {
     if (checkFirst(x, y)) false
     else if (checkSecond(x, y)) true
     else {

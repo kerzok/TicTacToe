@@ -6,6 +6,8 @@ scalaVersion := "2.11.8"
 
 fork := true
 val akkaVersion = "2.4.11"
+resolvers += Resolver.jcenterRepo
+
 libraryDependencies ++= Seq(
   "com.typesafe.akka" % "akka-actor_2.11" % "2.4.11",
   "com.typesafe.akka" % "akka-http-experimental_2.11" % "2.4.11",
@@ -21,7 +23,8 @@ libraryDependencies ++= Seq(
   "org.mongodb.scala" %% "mongo-scala-driver" % "1.1.1",
   "org.iq80.leveldb" % "leveldb" % "0.9",
   "org.fusesource.leveldbjni" % "leveldbjni-all" % "1.8",
-  "ch.megard" %% "akka-http-cors" % "0.1.7"
+  "ch.megard" %% "akka-http-cors" % "0.1.7",
+  "com.github.dnvriend" %% "akka-persistence-inmemory" % "1.3.10"
 )
 
 

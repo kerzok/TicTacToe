@@ -65,6 +65,7 @@ class GameManager(host: String, port: Int) extends PersistentActor with ActorLog
         handleWebSocketMessages(games.get(gameId).websocketFlow(side))
       } catch {
         case ex: ConnectionException => complete(JoinGameResponse("Fail", Some("There is some problem")))
+        case ex: Throwable => complete(JoinGameResponse("Fail", Some(ex.getMessage)))
       }
     }
   }
@@ -134,5 +135,3 @@ case class GameStore()(implicit val self: ActorRef) {
 
   private def gameId: String = UUID.randomUUID().toString
 }
-
-case object SaveSnapshot

@@ -1,3 +1,5 @@
+import java.util.concurrent.atomic.AtomicInteger
+
 import akka.actor.Props
 import akka.http.scaladsl.model.{ContentTypes, StatusCodes}
 import akka.http.scaladsl.server.MalformedRequestContentRejection
@@ -9,7 +11,7 @@ import com.github.kerzok.Utils.JsonSupport._
 import com.github.kerzok._
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 
-import scala.concurrent.Await
+import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 
 /**
@@ -90,9 +92,72 @@ class TestGame extends WordSpecLike
         }
       }
     }
+    "send fail message on move twice" in {
+      val game = gameServer.underlyingActor.games.createNewGame(GameSide.Tic)(gameServer.underlyingActor.context, gameServer.underlyingActor.dbActor)
+      val firstPlayer = WSProbe()
+      val secondPlayer = WSProbe()
+      WS(s"/game/${game.id}:${GameSide.Tic}", firstPlayer.flow) ~> gameServer.underlyingActor.wsRoute ~> check {
+        isWebSocketUpgrade shouldEqual true
+        WS(s"/game/${game.id}:${GameSide.Toe}", secondPlayer.flow) ~> gameServer.underlyingActor.wsRoute ~> check {
+          pushEvent(GameStart, waiter = Seq(firstPlayer, secondPlayer))
+          pushEvent(Move(GameSide.Tic, 0, 0), Seq(firstPlayer), Seq(secondPlayer))
+          val stringMove = GameEvent.eventToJson(Move(GameSide.Tic, 0, 0))
+          val errorMessage = GameEvent.eventToJson(Error("Not your turn"))
+          firstPlayer.sendMessage(stringMove)
+          firstPlayer.expectMessage(errorMessage)
+          pushEvent(Move(GameSide.Toe, 1, 0), Seq(secondPlayer), Seq(firstPlayer))
+          pushEvent(Move(GameSide.Tic, 1, 1), Seq(firstPlayer), Seq(secondPlayer))
+          pushEvent(Move(GameSide.Toe, 1, 2), Seq(secondPlayer), Seq(firstPlayer))
+          pushEvent(Move(GameSide.Tic, 2, 2), Seq(firstPlayer), Seq(secondPlayer))
+          pushEvent(Win(GameSide.Tic), waiter = Seq(firstPlayer, secondPlayer))
+          firstPlayer.sendCompletion()
+          firstPlayer.expectCompletion()
+          secondPlayer.sendCompletion()
+          secondPlayer.expectCompletion()
+        }
+      }
+    }
+    "send fail message on move with wrong coordinates" in {
+      val game = gameServer.underlyingActor.games.createNewGame(GameSide.Tic)(gameServer.underlyingActor.context, gameServer.underlyingActor.dbActor)
+      val firstPlayer = WSProbe()
+      val secondPlayer = WSProbe()
+      WS(s"/game/${game.id}:${GameSide.Tic}", firstPlayer.flow) ~> gameServer.underlyingActor.wsRoute ~> check {
+        isWebSocketUpgrade shouldEqual true
+        WS(s"/game/${game.id}:${GameSide.Toe}", secondPlayer.flow) ~> gameServer.underlyingActor.wsRoute ~> check {
+          pushEvent(GameStart, waiter = Seq(firstPlayer, secondPlayer))
+          pushEvent(Move(GameSide.Tic, 0, 0), Seq(firstPlayer), Seq(secondPlayer))
+          val stringMove = GameEvent.eventToJson(Move(GameSide.Toe, 5, 5))
+          val errorMessage = GameEvent.eventToJson(Error("Invalid coordinated"))
+          secondPlayer.sendMessage(stringMove)
+          secondPlayer.expectMessage(errorMessage)
+          pushEvent(Move(GameSide.Toe, 1, 0), Seq(secondPlayer), Seq(firstPlayer))
+          pushEvent(Move(GameSide.Tic, 1, 1), Seq(firstPlayer), Seq(secondPlayer))
+          pushEvent(Move(GameSide.Toe, 1, 2), Seq(secondPlayer), Seq(firstPlayer))
+          pushEvent(Move(GameSide.Tic, 2, 2), Seq(firstPlayer), Seq(secondPlayer))
+          pushEvent(Win(GameSide.Tic), waiter = Seq(firstPlayer, secondPlayer))
+          firstPlayer.sendCompletion()
+          firstPlayer.expectCompletion()
+          secondPlayer.sendCompletion()
+          secondPlayer.expectCompletion()
+        }
+      }
+    }
+    "send UserLeft message if opponent lost connection" in {
+      val game = gameServer.underlyingActor.games.createNewGame(GameSide.Tic)(gameServer.underlyingActor.context, gameServer.underlyingActor.dbActor)
+      val firstPlayer = WSProbe()
+      val secondPlayer = WSProbe()
+      WS(s"/game/${game.id}:${GameSide.Tic}", firstPlayer.flow) ~> gameServer.underlyingActor.wsRoute ~> check {
+        isWebSocketUpgrade shouldEqual true
+        WS(s"/game/${game.id}:${GameSide.Toe}", secondPlayer.flow) ~> gameServer.underlyingActor.wsRoute ~> check {
+          pushEvent(GameStart, waiter = Seq(firstPlayer, secondPlayer))
+          firstPlayer.sendCompletion()
+          firstPlayer.expectCompletion()
+          secondPlayer.expectMessage(GameEvent.eventToJson(UserLeft(GameSide.Tic)))
+        }
+      }
+    }
     "tic should win" in {
       val game = gameServer.underlyingActor.games.createNewGame(GameSide.Tic)(gameServer.underlyingActor.context, gameServer.underlyingActor.dbActor)
-      val firstUrl = game.connectionUrl(host, port, isFirst = true)
       val firstPlayer = WSProbe()
       val secondPlayer = WSProbe()
       WS(s"/game/${game.id}:${GameSide.Tic}", firstPlayer.flow) ~> gameServer.underlyingActor.wsRoute ~> check {
@@ -139,58 +204,53 @@ class TestGame extends WordSpecLike
       }
     }
     "should be parallel" in {
-      val gamesSize = 100
-      val array = new Array[Thread](gamesSize)
+      val count = new AtomicInteger()
+      val gamesSize = 10
       for {
         i <- 0 until gamesSize
-      } array(i) = new Thread(getDefaultGame)
-      for {
-        i <- 0 until gamesSize
-      } array(i).start()
-      for {
-        i <- 0 until gamesSize
-      } {
-        while (array(i).isAlive) {
-          Thread.sleep(10)
-        }
+      } Future {
+        runDefaultGame()
+      } (scala.concurrent.ExecutionContext.global) andThen {
+        case _ => count.incrementAndGet()
+      }
+      while (count.get() != gamesSize) {
+        Thread.sleep(100)
       }
     }
   }
 
-  def getDefaultGame: Runnable = new Runnable {
-    override def run(): Unit = {
-      val firstPlayer = WSProbe()
-      val secondPlayer = WSProbe()
-      Post("/createGame", CreateGameRequest(GameSide.Tic)) ~> route ~> check {
-        val createGameResponse = responseAs[CreateGameResponse]
-        createGameResponse.status shouldEqual "OK"
-        createGameResponse.url.isDefined shouldEqual true
-        createGameResponse.gameId.isDefined shouldEqual true
-        val gameId = createGameResponse.gameId.get
-        Post("/joinGame", JoinGameRequest(gameId)) ~> route ~> check {
-          val joinGameResponse = responseAs[JoinGameResponse]
-          if (joinGameResponse.status == "Fail") println(joinGameResponse.errorMessage + s" gameId : $gameId")
-          joinGameResponse.status shouldEqual "OK"
-          joinGameResponse.url.isDefined shouldEqual true
-          WS(s"/game/$gameId:${GameSide.Tic}", firstPlayer.flow) ~> wsRoute ~> check {
-            isWebSocketUpgrade shouldEqual true
-            WS(s"/game/$gameId:${GameSide.Toe}", secondPlayer.flow) ~> wsRoute ~> check {
-              pushEvent(GameStart, waiter = Seq(firstPlayer, secondPlayer))
-              pushEvent(Move(GameSide.Tic, 1, 1), Seq(firstPlayer), Seq(secondPlayer))
-              pushEvent(Move(GameSide.Toe, 0, 0), Seq(secondPlayer), Seq(firstPlayer))
-              pushEvent(Move(GameSide.Tic, 0, 1), Seq(firstPlayer), Seq(secondPlayer))
-              pushEvent(Move(GameSide.Toe, 2, 0), Seq(secondPlayer), Seq(firstPlayer))
-              pushEvent(Move(GameSide.Tic, 0, 2), Seq(firstPlayer), Seq(secondPlayer))
-              pushEvent(Move(GameSide.Toe, 1, 2), Seq(secondPlayer), Seq(firstPlayer))
-              pushEvent(Move(GameSide.Tic, 2, 2), Seq(firstPlayer), Seq(secondPlayer))
-              pushEvent(Move(GameSide.Toe, 2, 1), Seq(secondPlayer), Seq(firstPlayer))
-              pushEvent(Move(GameSide.Tic, 1, 0), Seq(firstPlayer), Seq(secondPlayer))
-              pushEvent(Draw, waiter = Seq(firstPlayer, secondPlayer))
-              firstPlayer.sendCompletion()
-              firstPlayer.expectCompletion()
-              secondPlayer.sendCompletion()
-              secondPlayer.expectCompletion()
-            }
+  def runDefaultGame(): Unit = {
+    val firstPlayer = WSProbe()
+    val secondPlayer = WSProbe()
+    Post("/createGame", CreateGameRequest(GameSide.Tic)) ~> route ~> check {
+      val createGameResponse = responseAs[CreateGameResponse]
+      createGameResponse.status shouldEqual "OK"
+      createGameResponse.url.isDefined shouldEqual true
+      createGameResponse.gameId.isDefined shouldEqual true
+      val gameId = createGameResponse.gameId.get
+      Post("/joinGame", JoinGameRequest(gameId)) ~> route ~> check {
+        val joinGameResponse = responseAs[JoinGameResponse]
+        if (joinGameResponse.status == "Fail") println(joinGameResponse.errorMessage + s" gameId : $gameId")
+        joinGameResponse.status shouldEqual "OK"
+        joinGameResponse.url.isDefined shouldEqual true
+        WS(s"/game/$gameId:${GameSide.Tic}", firstPlayer.flow) ~> wsRoute ~> check {
+          isWebSocketUpgrade shouldEqual true
+          WS(s"/game/$gameId:${GameSide.Toe}", secondPlayer.flow) ~> wsRoute ~> check {
+            pushEvent(GameStart, waiter = Seq(firstPlayer, secondPlayer))
+            pushEvent(Move(GameSide.Tic, 1, 1), Seq(firstPlayer), Seq(secondPlayer))
+            pushEvent(Move(GameSide.Toe, 0, 0), Seq(secondPlayer), Seq(firstPlayer))
+            pushEvent(Move(GameSide.Tic, 0, 1), Seq(firstPlayer), Seq(secondPlayer))
+            pushEvent(Move(GameSide.Toe, 2, 0), Seq(secondPlayer), Seq(firstPlayer))
+            pushEvent(Move(GameSide.Tic, 0, 2), Seq(firstPlayer), Seq(secondPlayer))
+            pushEvent(Move(GameSide.Toe, 1, 2), Seq(secondPlayer), Seq(firstPlayer))
+            pushEvent(Move(GameSide.Tic, 2, 2), Seq(firstPlayer), Seq(secondPlayer))
+            pushEvent(Move(GameSide.Toe, 2, 1), Seq(secondPlayer), Seq(firstPlayer))
+            pushEvent(Move(GameSide.Tic, 1, 0), Seq(firstPlayer), Seq(secondPlayer))
+            pushEvent(Draw, waiter = Seq(firstPlayer, secondPlayer))
+            firstPlayer.sendCompletion()
+            firstPlayer.expectCompletion()
+            secondPlayer.sendCompletion()
+            secondPlayer.expectCompletion()
           }
         }
       }
