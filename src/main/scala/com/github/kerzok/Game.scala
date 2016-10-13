@@ -1,5 +1,7 @@
 package com.github.kerzok
 
+import java.util.concurrent.atomic.AtomicInteger
+
 import akka.actor.{ActorContext, ActorRef, Props}
 import akka.http.scaladsl.model.ws.{Message, TextMessage}
 import akka.stream._
@@ -16,7 +18,7 @@ import org.json4s.native.JsonMethods._
   */
 class Game(val id: String, firstUserSide: GameSide, context: ActorContext, dbActorRef: ActorRef) {
   private[this] val gameActor = context.actorOf(Props(classOf[GameActor], id, dbActorRef), s"game-$id")
-  private[this] var playersCount = 0
+  private[this] val playersCount = new AtomicInteger(0)
 
   def connectionUrl(host: String, port: Int, isFirst: Boolean): String = {
     val gameSide = if (isFirst) firstUserSide else GameSide.opponentSide(firstUserSide)
@@ -26,8 +28,7 @@ class Game(val id: String, firstUserSide: GameSide, context: ActorContext, dbAct
   def getSide(isFirst: Boolean): GameSide = if (isFirst) firstUserSide else GameSide.opponentSide(firstUserSide)
 
   def websocketFlow(side: GameSide): Flow[Message, Message, _] = {
-    playersCount += 1
-    if (playersCount <= 2) {
+    if (playersCount.incrementAndGet() <= 2) {
       Flow.fromGraph(GraphDSL.create(Source.actorRef[GameEvent](5, OverflowStrategy.fail)) {
         implicit builder ⇒ playerActor ⇒
           import GraphDSL.Implicits._

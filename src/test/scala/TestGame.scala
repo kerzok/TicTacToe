@@ -1,12 +1,12 @@
 import akka.actor.Props
-import akka.http.scaladsl.model.{ContentTypes, StatusCodes, Uri}
+import akka.http.scaladsl.model.{ContentTypes, StatusCodes}
 import akka.http.scaladsl.server.MalformedRequestContentRejection
 import akka.http.scaladsl.testkit.{ScalatestRouteTest, WSProbe}
 import akka.testkit.TestActorRef
-import com.github.kerzok._
 import com.github.kerzok.Model.{CreateGameRequest, CreateGameResponse, JoinGameRequest, JoinGameResponse}
 import com.github.kerzok.Utils.GameSide
 import com.github.kerzok.Utils.JsonSupport._
+import com.github.kerzok._
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 
 import scala.concurrent.Await
@@ -33,7 +33,7 @@ class TestGame extends WordSpecLike
   }
 
   "An game server" should {
-    "Respond with game id after request for startGame" in {
+    "respond with game id after request for startGame" in {
       Post("/createGame", CreateGameRequest(GameSide.Tic)) ~> gameServer.underlyingActor.route ~> check {
         status shouldBe StatusCodes.OK
         val response = responseAs[CreateGameResponse]
@@ -43,7 +43,7 @@ class TestGame extends WordSpecLike
         response.url.get shouldEqual s"ws://$host:${port + 1}/game/${response.gameId.get}:${GameSide.Tic}"
       }
     }
-    "Respond with game id after request for joinGame" in {
+    "respond with game id after request for joinGame" in {
       val game = gameServer.underlyingActor.games.createNewGame(GameSide.Toe)(gameServer.underlyingActor.context, gameServer.underlyingActor.dbActor)
       Post("/joinGame", JoinGameRequest(game.id)) ~> gameServer.underlyingActor.route ~> check {
         status shouldBe StatusCodes.OK
@@ -53,12 +53,12 @@ class TestGame extends WordSpecLike
         response.url.get shouldEqual s"ws://$host:${port + 1}/game/${game.id}:${GameSide.Tic}"
       }
     }
-    "Reject with MalformedRequestContentRejection after request for createGame with invalid side" in {
+    "reject with MalformedRequestContentRejection after request for createGame with invalid side" in {
       Post("/createGame").withEntity(ContentTypes.`application/json`, "{\"side\":\"blah\"}") ~> gameServer.underlyingActor.route ~> check {
         rejections.exists(elem => elem.isInstanceOf[MalformedRequestContentRejection]) shouldBe true
       }
     }
-    "Respond with error after request for joinGame with invalid game id" in {
+    "respond with error after request for joinGame with invalid game id" in {
       Post("/joinGame", JoinGameRequest("")) ~> gameServer.underlyingActor.route ~> check {
         status shouldBe StatusCodes.OK
         val response = responseAs[JoinGameResponse]
@@ -68,14 +68,14 @@ class TestGame extends WordSpecLike
         response.errorMessage.get shouldEqual "There is no game with such id"
       }
     }
-    "Connect to websocket" in {
+    "connect to websocket" in {
       val game = gameServer.underlyingActor.games.createNewGame(GameSide.Toe)(gameServer.underlyingActor.context, gameServer.underlyingActor.dbActor)
       val url = game.connectionUrl(host, port, isFirst = true)
       WS(s"/game/${game.id}:${GameSide.Toe}", wsClient.flow) ~> gameServer.underlyingActor.wsRoute ~> check {
         isWebSocketUpgrade shouldEqual true
       }
     }
-    "Block connection if third user tried to connect" in {
+    "block connection if third user tried to connect" in {
       val game = gameServer.underlyingActor.games.createNewGame(GameSide.Tic)(gameServer.underlyingActor.context, gameServer.underlyingActor.dbActor)
       val firstPlayer = WSProbe()
       val secondPlayer = WSProbe()
@@ -90,7 +90,7 @@ class TestGame extends WordSpecLike
         }
       }
     }
-    "Tic should win" in {
+    "tic should win" in {
       val game = gameServer.underlyingActor.games.createNewGame(GameSide.Tic)(gameServer.underlyingActor.context, gameServer.underlyingActor.dbActor)
       val firstUrl = game.connectionUrl(host, port, isFirst = true)
       val firstPlayer = WSProbe()
@@ -112,7 +112,7 @@ class TestGame extends WordSpecLike
         }
       }
     }
-    "Draw should happened" in {
+    "draw should happened" in {
       val game = gameServer.underlyingActor.games.createNewGame(GameSide.Tic)(gameServer.underlyingActor.context, gameServer.underlyingActor.dbActor)
       val firstUrl = game.connectionUrl(host, port, isFirst = true)
       val firstPlayer = WSProbe(maxChunkCollectionMills = 10000)
@@ -138,7 +138,7 @@ class TestGame extends WordSpecLike
         }
       }
     }
-    "can service in parallel" in {
+    "should be parallel" in {
       val gamesSize = 100
       val array = new Array[Thread](gamesSize)
       for {
